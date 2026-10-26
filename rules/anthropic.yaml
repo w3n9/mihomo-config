@@ -1,0 +1,69 @@
+# 通用 Mihomo 配置片段；客户端的合并语法由构建脚本生成。
+proxy-groups:
+  - name: Anthropic
+    type: select
+    filter: ".+static-.+"
+    dialer-proxy: "jump-default"
+
+# 仅这些域名的 DNS 经 Anthropic 当前所选节点发往 Cloudflare DoH。
+# Anthropic 组需选择美国落地节点；其他域名继续使用订阅的 DNS。
+dns:
+  nameserver-policy:
+    "+.anthropic.com": &anthropic-doh "https://1.1.1.1/dns-query#Anthropic"
+    "+.claude.ai": *anthropic-doh
+    "+.claude.com": *anthropic-doh
+    "+.clau.de": *anthropic-doh
+    "+.claudemcpclient.com": *anthropic-doh
+    "+.claudemcpcontent.com": *anthropic-doh
+    "+.claudeusercontent.com": *anthropic-doh
+    "servd-anthropic-website.b-cdn.net": *anthropic-doh
+    "anthropic.com.cdn.cloudflare.net": *anthropic-doh
+    "anthropic.auth0.com": *anthropic-doh
+    "anthropic-com.ghost.io": *anthropic-doh
+    "+.sentry.io": *anthropic-doh
+    "+.statsigapi.net": *anthropic-doh
+    "browser-intake-us5-datadoghq.com": *anthropic-doh
+    # DOMAIN-KEYWORD 无法直接用 DNS 域名通配表达，列出已知服务域名。
+    "+.datadog.com": *anthropic-doh
+    "+.datadoghq.com": *anthropic-doh
+    "+.datadoghq.eu": *anthropic-doh
+    "+.sift.com": *anthropic-doh
+    "+.siftscience.com": *anthropic-doh
+    "+.intercom.io": *anthropic-doh
+    "+.intercomcdn.com": *anthropic-doh
+    "cdn.usefathom.com": *anthropic-doh
+    # 检测页的随机 DNS 探测域名；网站主页仍沿用原订阅规则。
+    "+.d.ip.net.coffee": *anthropic-doh
+
+rules:
+  ## 参考自https://ip.net.coffee/claude/site.html
+  # 核心域名
+  - DOMAIN-SUFFIX,anthropic.com,Anthropic
+  - DOMAIN-SUFFIX,claude.ai,Anthropic
+  - DOMAIN-SUFFIX,claude.com,Anthropic
+  - DOMAIN-SUFFIX,clau.de,Anthropic
+  - DOMAIN-SUFFIX,claudemcpclient.com,Anthropic
+  - DOMAIN-SUFFIX,claudemcpcontent.com,Anthropic
+  - DOMAIN-SUFFIX,claudeusercontent.com,Anthropic
+  # CDN 和静态资源
+  - DOMAIN,servd-anthropic-website.b-cdn.net,Anthropic
+  - DOMAIN,anthropic.com.cdn.cloudflare.net,Anthropic
+  # 认证 / 内容
+  - DOMAIN,anthropic.auth0.com,Anthropic
+  - DOMAIN,anthropic-com.ghost.io,Anthropic
+  # 监控和遥测
+  - DOMAIN-SUFFIX,sentry.io,Anthropic
+  - DOMAIN-SUFFIX,statsigapi.net,Anthropic
+  - DOMAIN,browser-intake-us5-datadoghq.com,Anthropic
+  - DOMAIN-KEYWORD,datadog,Anthropic
+  - DOMAIN-KEYWORD,sift,Anthropic
+  # 客服 / 第三方 widget
+  - DOMAIN-SUFFIX,intercom.io,Anthropic
+  - DOMAIN-SUFFIX,intercomcdn.com,Anthropic
+  - DOMAIN,cdn.usefathom.com,Anthropic
+  # DNS 检测请求同样走美国落地，兼容 fake-ip / SOCKS5 远端解析。
+  - DOMAIN-SUFFIX,d.ip.net.coffee,Anthropic
+  # IP 段 / ASN 兜底
+  - IP-CIDR,160.79.104.0/21,Anthropic,no-resolve
+  - IP-CIDR6,2607:6bc0::/32,Anthropic,no-resolve
+  - IP-ASN,399358,Anthropic,no-resolve

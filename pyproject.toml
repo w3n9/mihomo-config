@@ -1,0 +1,9 @@
+[project]
+name = "mihomo-config"
+version = "0.1.0"
+description = "为 Clash Verge Rev 和 OpenClash 生成通用配置及叠加配置"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0,<7"]
+
+[tool.uv]
+package = false

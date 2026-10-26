@@ -1,0 +1,8 @@
+# 参考 https://wiki.metacubex.one/config/proxies/
+proxies:
+  - name: "non-directed-static-US-NY-01"
+    type: socks5
+    server: xx.xx.xx.xx
+    port: xxxx
+    username: xxxx
+    password: xxxx
