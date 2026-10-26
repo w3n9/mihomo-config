@@ -32,6 +32,7 @@ proxies.yaml                    全部个人节点，顶层为 proxies
 rules/*.yaml、rules/*.yml         通用策略，支持 proxy-groups、rules、dns
 clients/clash-verge/extension.js Clash Verge Rev 适配模板
 clients/openclash/overwrite.conf OpenClash 适配模板
+clients/openclash/jump-groups.rb OpenClash 前置策略组收集逻辑
 scripts/build.py                 构建与基础校验
 dist/                           自动生成的客户端文件
 ```
@@ -55,7 +56,7 @@ rules:
 
 `no-resolve`、`src` 等附加参数放在目标策略之后。构建脚本会拒绝 `IP-CIDR,网段,no-resolve,Anthropic` 这种参数错位的规则。
 
-新增其他业务时，可在 `rules/` 下新建 YAML 文件，也可在已有文件中追加策略组和对应规则。每个文件至少提供 `proxy-groups`、`rules`、`dns` 中的一项，也允许组和规则为空列表。`dns` 仅支持 `nameserver-policy`；不同文件不能重复定义同一个 DNS 策略键。所有文件加载后统一校验组和规则引用，因此策略组和规则可以引用其他文件定义的组，不受文件顺序限制。若策略组显式填写 `proxies` 来引用其他自定义策略组或 `DIRECT` 等内置策略，则仅使用该列表，不再自动加入个人节点。自动生成的 `jump-default` 继续收集订阅中的前置节点。
+新增其他业务时，可在 `rules/` 下新建 YAML 文件，也可在已有文件中追加策略组和对应规则。每个文件至少提供 `proxy-groups`、`rules`、`dns` 中的一项，也允许组和规则为空列表。`dns` 仅支持 `nameserver-policy`；不同文件不能重复定义同一个 DNS 策略键。所有文件加载后统一校验组和规则引用，因此策略组和规则可以引用其他文件定义的组，不受文件顺序限制。若策略组显式填写 `proxies` 来引用其他自定义策略组或 `DIRECT` 等内置策略，则仅使用该列表，不再自动加入个人节点。自动生成的 `jump-default` 收集订阅中的前置节点和可用策略组。
 
 规则源文件不使用 `+rules`、`proxy-groups+` 等客户端专用语法，也不放 `MATCH`。`rules/` 中至少需要一个 YAML 规则文件。构建脚本会检查名称重复、provider 引用和规则出口；更完整的协议、正则和组引用环校验由 Mihomo 完成。
 
@@ -94,10 +95,11 @@ DNS 策略不能直接表达 `DOMAIN-KEYWORD`，因此配置中列出了 Datadog
 dialer-proxy: jump-default
 ```
 
-无需在源文件中重复填写默认前置，也无需知道机场的节点组或 provider 名称。生成的前置组使用 `include-all`，由 Mihomo 在加载配置时收集原订阅中的普通节点及代理集合节点，不包含订阅的策略组。
+无需在源文件中重复填写默认前置，也无需知道机场的节点组或 provider 名称。生成的前置组使用 `include-all`，由 Mihomo 在加载配置时收集原订阅中的普通节点及代理集合节点。两端适配器还会在合并订阅时收集原有的 `select`、`url-test`、`fallback` 等策略组，作为 `jump-default` 的显式选项；可以选择订阅的自动选择组，也可以继续直接选择节点。
 
 - 构建时根据 `proxies.yaml` 中全部个人节点的完整名称生成排除正则，避免将落地节点选作自身的前置；节点名称中的正则特殊字符会转义。
-- 前置组还排除 `direct`、`reject` 类型的节点。候选按 Mihomo 的规则排序，首次使用时默认选中第一项，需要手动确认一个可用的境外节点。
+- 策略组选项按订阅中的顺序保留；同名组以最后定义为准。自动收集的节点继续由 Mihomo 排序。首次使用时默认选中第一项，需要手动确认一个可用的境外节点或策略组。
+- 收集策略组时排除本仓库新增或覆盖的业务组、`jump-default` 自身，以及直接或间接依赖这些组、个人落地节点的组。也会检查节点前置、内联代理集合、自动收集节点和筛选条件，避免新增的策略组选项使前置链路形成循环。`direct`、`reject` 类型的普通节点仍会排除。
 - 两端产物都会启用 `profile.store-selected`，保存手动选择；原有 `profile` 中其他设置保留。不同订阅若有同名节点，选择记忆也可能复用。
 - 原订阅更新或换成另一份订阅时，候选会随最终配置变化。保存的节点名不存在时，Mihomo 会选择当前列表中的第一项，需要重新确认。
 - 没有其他节点可用时，`empty-fallback: REJECT` 使该组拒绝连接；这个选项只处理候选列表为空的情况，不会在所有节点超时时自动切换。
@@ -115,7 +117,7 @@ dialer-proxy: jump-default
 1. 构建后打开 `dist/clash-verge.js`，复制全部内容。
 2. 在「订阅」页面右键目标订阅，进入该订阅的扩展脚本编辑器（通常为「编辑脚本」）。
 3. 粘贴生成脚本并保存，应用或重新激活该订阅。
-4. 在代理面板中的 `jump-default` 选择可用的订阅节点，再在 `Anthropic` 选择你的落地节点。
+4. 在代理面板中的 `jump-default` 选择可用的订阅节点或策略组，再在 `Anthropic` 选择你的落地节点。
 
 如果希望所有订阅都应用，可将同一脚本放入全局扩展脚本。一个订阅选择一种挂载方式即可；已有其他扩展脚本时，需要将其逻辑与此脚本合并，保持一个 `main(config)` 入口。
 
@@ -127,7 +129,7 @@ dialer-proxy: jump-default
 
 1. 将生成的 `dist/openclash.conf` 作为本地覆写模块导入；若界面需要先创建本地模块，则将文件内容粘贴到模块编辑器中。
 2. 启用该模块，并在模块的配置匹配设置中选择需要应用的订阅配置。
-3. 保存并重启 OpenClash，先在 `jump-default` 选择可用的订阅节点，再在 `Anthropic` 选择落地节点。
+3. 保存并重启 OpenClash，先在 `jump-default` 选择可用的订阅节点或策略组，再在 `Anthropic` 选择落地节点。
 
 使用的是「覆写模块」功能，不是把 `.conf` 当作完整 YAML 配置上传。模块里的 YAML 块追加策略组、前置规则；helper 在 YAML 合并后按名称去重策略组，以最后追加的个人定义为准。
 
@@ -136,7 +138,7 @@ dialer-proxy: jump-default
 ## 合并约定
 
 - `local-proxies` 是本仓库保留的代理集合名，同名集合会被个人定义完整替换。
-- `jump-default` 是自动生成的保留策略组，同名订阅组会被个人定义替换；候选自动收集，不引用机场自己的策略组。
+- `jump-default` 是自动生成的保留策略组，同名订阅组会被个人定义替换；候选自动收集订阅节点和不会形成循环的订阅策略组。
 - 同名策略组以个人定义为准，不保留旧组的测速 URL 等字段；其他策略组保留。
 - 个人规则前置，完全相同的规则去重；重复应用不会累积重复组或规则。
 - 叠加产物不注入 `MATCH`；DNS 仅合并 `nameserver-policy`，其他 DNS 设置、端口和 TUN 保留。

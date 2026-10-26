@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIALER_GROUP = "jump-default"
 PROXY_PROVIDER = "local-proxies"
 OPENCLASH_DNS_POLICY_KEY = "__overlay-dns-policy"
+OPENCLASH_GROUP_NAMES_KEY = "__overlay-group-names"
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"}
 RULE_OPTIONS = {"no-resolve", "src"}
 HEADER = "# 此文件由 scripts/build.py 自动生成，请修改源文件后重新构建。\n"
@@ -199,6 +200,7 @@ def render(root: Path) -> dict[str, str]:
     overlay = load_overlay(root)
 
     verge = (root / "clients/clash-verge/extension.js").read_text(encoding="utf-8")
+    verge = verge.replace("__PROXY_PROVIDER__", PROXY_PROVIDER).replace("__DIALER_GROUP__", DIALER_GROUP)
     verge = verge.replace("__OVERLAY_CONFIG__", json.dumps(overlay, ensure_ascii=False, indent=2))
 
     patch = {
@@ -209,6 +211,7 @@ def render(root: Path) -> dict[str, str]:
         "proxy-providers": overlay["proxy-providers"],
         "proxy-groups+": overlay["proxy-groups"],
         "+rules": overlay["rules"],
+        OPENCLASH_GROUP_NAMES_KEY: [group["name"] for group in overlay["proxy-groups"]],
     }
     dns_overwrite = ""
     if "dns" in overlay:
@@ -224,6 +227,12 @@ def render(root: Path) -> dict[str, str]:
     openclash = (root / "clients/openclash/overwrite.conf").read_text(encoding="utf-8")
     openclash = openclash.replace("__OVERLAY_CONFIG__", dump_yaml(patch, openclash=True).rstrip())
     openclash = openclash.replace("__DNS_OVERWRITE__", dns_overwrite)
+    group_expression = " ".join(
+        line.strip()
+        for line in (root / "clients/openclash/jump-groups.rb").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    openclash = openclash.replace("__JUMP_GROUPS__", group_expression)
 
     return {
         "clash-verge.js": "// 由 scripts/build.py 自动生成，请修改源文件后重新构建。\n" + verge,

@@ -132,6 +132,7 @@ class BuildTests(unittest.TestCase):
 
     def assert_merged(self, merged, original):
         overlay = load_overlay(self.root)
+        overlay["proxy-groups"][0]["proxies"] = ["Airport"]
         for key in ("mixed-port", "dns", "tun", "proxies"):
             self.assertEqual(merged[key], original[key])
         self.assertEqual(merged["proxy-providers"]["airport"], original["proxy-providers"]["airport"])
@@ -361,6 +362,96 @@ class BuildTests(unittest.TestCase):
                 else:
                     self.assertEqual(merged, load_overlay(self.root))
 
+    def subscription_group_variants(self):
+        safe = self.subscription()
+        safe["proxy-groups"] = [
+            {"name": "Airport", "type": "select", "proxies": ["Airport-Node"]},
+            {"name": "Duplicate", "type": "select", "proxies": [DIALER_GROUP]},
+            {"name": "Auto", "type": "url-test", "use": ["airport"], "url": "https://example.com", "interval": 300},
+            {"name": "Backup", "type": "fallback", "proxies": ["Auto"], "url": "https://example.com", "interval": 300},
+            {"name": "Duplicate", "type": "select", "proxies": ["DIRECT"]},
+            {"name": "Preferred", "type": "select", "proxies": ["Backup", "Airport"]},
+            {"name": "AllRaw", "type": "select", "include-all-proxies": True},
+            {"name": DIALER_GROUP, "type": "select", "proxies": ["DIRECT"]},
+            {"name": "Anthropic", "type": "select", "proxies": ["DIRECT"]},
+        ]
+        unsafe = self.subscription()
+        unsafe["proxies"].append({
+            "name": "Chained-Node", "type": "socks5", "server": "127.0.0.1", "port": 2082,
+            "dialer-proxy": "Anthropic",
+        })
+        unsafe["proxy-providers"]["chained"] = {
+            "type": "inline", "payload": [{
+                "name": "Chained-Provider-Node", "type": "socks5", "server": "127.0.0.1", "port": 2083,
+            }], "override": {"dialer-proxy": DIALER_GROUP},
+        }
+        unsafe["proxy-groups"] = [
+            {"name": "Airport", "type": "select", "proxies": ["Airport-Node"]},
+            {"name": "Jump", "type": "select", "proxies": [DIALER_GROUP]},
+            {"name": "IndirectJump", "type": "select", "proxies": ["Jump"]},
+            {"name": "Business", "type": "select", "proxies": ["Anthropic"]},
+            {"name": "IndirectBusiness", "type": "select", "proxies": ["Business"]},
+            {"name": "Landing", "type": "select", "proxies": ["Static-Test"]},
+            {"name": "LocalProvider", "type": "select", "use": ["local-proxies"]},
+            {"name": "IndirectLocalProvider", "type": "select", "proxies": ["LocalProvider"]},
+            {"name": "ChainedRaw", "type": "select", "proxies": ["Chained-Node"]},
+            {"name": "ChainedProvider", "type": "select", "use": ["chained"]},
+            {"name": "ChainedProviderNode", "type": "select", "proxies": ["Chained-Provider-Node"]},
+            {"name": "SelfLoop", "type": "select", "proxies": ["SelfLoop"]},
+            {"name": "EveryNode", "type": "select", "include-all": True},
+            {"name": "EveryProvider", "type": "select", "include-all-providers": True},
+            {"name": "FilteredNodes", "type": "select", "include-all": True,
+             "exclude-filter": "^(Static-Test|Chained-Node|Chained-Provider-Node)$"},
+            {"name": DIALER_GROUP, "type": "select", "proxies": ["DIRECT"]},
+            {"name": "Anthropic", "type": "select", "proxies": ["DIRECT"]},
+        ]
+        changed = {"proxy-groups": [{"name": "Changed", "type": "select", "proxies": ["DIRECT"]}]}
+        return (
+            (safe, ["Airport", "Auto", "Backup", "Duplicate", "Preferred", "AllRaw"]),
+            (unsafe, ["Airport", "FilteredNodes"]),
+            (changed, ["Changed"]),
+            ({}, []),
+        )
+
+    def assert_subscription_groups_collected(self, merged, original, expected_names):
+        overlay = load_overlay(self.root)
+        expected_jump = dict(overlay["proxy-groups"][0])
+        if expected_names:
+            expected_jump["proxies"] = expected_names
+        groups = merged["proxy-groups"]
+        self.assertEqual(next(group for group in groups if group["name"] == DIALER_GROUP), expected_jump)
+        self.assertEqual(len(groups), len({group["name"] for group in groups}))
+        self.assertEqual(set(merged), set(original) | set(overlay))
+        if "proxies" in original:
+            self.assertEqual(merged["proxies"], original["proxies"])
+        for name, provider in original.get("proxy-providers", {}).items():
+            if name != "local-proxies":
+                self.assertEqual(merged["proxy-providers"][name], provider)
+        if "Duplicate" in expected_names:
+            self.assertEqual(next(group for group in groups if group["name"] == "Duplicate"), {
+                "name": "Duplicate", "type": "select", "proxies": ["DIRECT"],
+            })
+
+    @unittest.skipUnless(shutil.which("node"), "需要 Node.js 执行 Clash Verge 扩展")
+    def test_verge_collects_safe_subscription_groups_and_retains_nodes(self):
+        script = self.root / "extension.js"
+        script.write_text(render(self.root)["clash-verge.js"], encoding="utf-8")
+        for original, expected in self.subscription_group_variants():
+            with self.subTest(expected=expected):
+                merged = merge_verge(script, original)
+                self.assert_subscription_groups_collected(merged, original, expected)
+
+    @unittest.skipUnless(
+        shutil.which("ruby") and os.environ.get("OPENCLASH_YAML_LIBRARY"),
+        "设置 OPENCLASH_YAML_LIBRARY 指向官方 YAML.rb 可运行 OpenClash 集成验证",
+    )
+    def test_openclash_collects_safe_subscription_groups_and_retains_nodes(self):
+        module = render(self.root)["openclash.conf"]
+        for original, expected in self.subscription_group_variants():
+            with self.subTest(expected=expected):
+                merged = merge_openclash(self.root, module, original)
+                self.assert_subscription_groups_collected(merged, original, expected)
+
     def dns_subscription_variants(self):
         original = self.subscription()
         original["dns"].update({
@@ -497,7 +588,7 @@ class BuildTests(unittest.TestCase):
                     process.wait(timeout=5)
 
         def initial(state):
-            self.assertEqual(set(state["all"]), {"Airport-Node", "Provider-Node"})
+            self.assertEqual(set(state["all"]), {"Airport", "Airport-Node", "Provider-Node"})
             self.assertNotIn(local_name, state["all"])
             api("PUT", {"name": "Provider-Node"})
 
