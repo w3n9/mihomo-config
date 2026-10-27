@@ -2,13 +2,23 @@
 
 一份节点列表和多份分流策略，生成 Clash Verge Rev 扩展脚本与 OpenClash 覆写模块，叠加到已有订阅配置上使用。
 
-## 构建
+## 快速开始
 
-在仓库目录执行（需要 Python 3.10+ 和 [uv](https://docs.astral.sh/uv/)）：
+需要 Python 3.10+ 和 [uv](https://docs.astral.sh/uv/)。一般使用者直接使用仓库提供的分流规则，只需准备自己的节点配置并构建：
 
-```sh
-uv run scripts/build.py
-```
+1. 在仓库根目录，将示例复制为本地配置：
+
+   ```sh
+   cp proxies.yaml.example proxies.yaml
+   ```
+
+2. 编辑 `proxies.yaml`，将示例中的服务器地址、端口、用户名和密码替换为实际节点信息，端口填写整数。可按需增加节点或调整协议类型；沿用默认 Anthropic 规则时，可保留示例节点名称。若修改名称，需确保它符合 `rules/anthropic.yaml` 中的 `filter`。
+
+3. 执行构建：
+
+   ```sh
+   uv run scripts/build.py
+   ```
 
 `uv` 自动安装锁定的依赖。生成文件位于 `dist/`：
 
@@ -17,17 +27,20 @@ uv run scripts/build.py
 | `dist/clash-verge.js` | 已有订阅时，作为 Clash Verge Rev 扩展脚本 |
 | `dist/openclash.conf` | 已有订阅时，作为 OpenClash 覆写模块 |
 
+构建完成后，按下方「客户端接入」将对应产物应用到已有订阅。以后修改 `proxies.yaml` 后，重新构建并更新客户端中的产物即可。
+
 也可以指定输出目录：
 
 ```sh
 uv run scripts/build.py --output-dir /tmp/mihomo-config
 ```
 
-产物内嵌节点，不需要额外部署订阅服务或复制 provider 文件。`dist/` 包含与节点源文件相同的凭据，已加入 `.gitignore`。修改源文件后，需要重新构建，并在客户端更新对应文件或脚本。
+产物内嵌节点，不需要额外部署订阅服务或复制 provider 文件。本地 `proxies.yaml` 和生成目录 `dist/` 均包含节点凭据，已加入 `.gitignore`；仓库中的 `proxies.yaml.example` 仅作为示例模板。
 
 ## 日常维护
 
 ```text
+proxies.yaml.example            节点示例，首次使用时复制为 proxies.yaml
 proxies.yaml                    全部个人节点，顶层为 proxies
 rules/*.yaml、rules/*.yml         通用策略，支持 proxy-groups、rules、dns
 clients/clash-verge/extension.js Clash Verge Rev 适配模板
