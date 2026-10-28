@@ -3,7 +3,6 @@ proxy-groups:
   - name: Anthropic
     type: select
     filter: ".+static-.+"
-    dialer-proxy: "jump-default"
 
 # 仅这些域名的 DNS 经 Anthropic 当前所选节点发往 Cloudflare DoH。
 # Anthropic 组需选择美国落地节点；其他域名继续使用订阅的 DNS。
@@ -32,10 +31,17 @@ dns:
     "+.intercom.io": *anthropic-doh
     "+.intercomcdn.com": *anthropic-doh
     "cdn.usefathom.com": *anthropic-doh
-    # 检测页的随机 DNS 探测域名；网站主页仍沿用原订阅规则。
-    "+.d.ip.net.coffee": *anthropic-doh
+    # 检测站自身、随机 DNS 探测域名及页面使用的 STUN 服务。
+    "+.ip.net.coffee": *anthropic-doh
+    "stun.l.google.com": *anthropic-doh
+    "stun.cloudflare.com": *anthropic-doh
 
 rules:
+  # WebRTC 向 STUN 服务器发 UDP，不会携带发起页面的域名。
+  # 覆盖检测页的 19302 / 3478 及常用的 5349；同时匹配 IPv4 / IPv6。
+  # 节点未启用 UDP 时 Mihomo 会继续向下匹配，必须紧接 REJECT 防止换出口。
+  - AND,((NETWORK,UDP),(DST-PORT,3478/5349/19302)),Anthropic
+  - AND,((NETWORK,UDP),(DST-PORT,3478/5349/19302)),REJECT
   ## 参考自https://ip.net.coffee/claude/site.html
   # 核心域名
   - DOMAIN-SUFFIX,anthropic.com,Anthropic
@@ -61,8 +67,8 @@ rules:
   - DOMAIN-SUFFIX,intercom.io,Anthropic
   - DOMAIN-SUFFIX,intercomcdn.com,Anthropic
   - DOMAIN,cdn.usefathom.com,Anthropic
-  # DNS 检测请求同样走美国落地，兼容 fake-ip / SOCKS5 远端解析。
-  - DOMAIN-SUFFIX,d.ip.net.coffee,Anthropic
+  # 检测站和 DNS 探测请求同样走落地，兼容 fake-ip / SOCKS5 远端解析。
+  - DOMAIN-SUFFIX,ip.net.coffee,Anthropic
   # IP 段 / ASN 兜底
   - IP-CIDR,160.79.104.0/21,Anthropic,no-resolve
   - IP-CIDR6,2607:6bc0::/32,Anthropic,no-resolve

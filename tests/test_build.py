@@ -146,9 +146,7 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(set(artifacts), {"clash-verge.js", "openclash.conf"})
         patch_text = artifacts["openclash.conf"].split("[YAML]\n", 1)[1].split("[Overwrite]", 1)[0]
         patch = yaml.safe_load(patch_text)
-        self.assertEqual(patch["proxy-providers"]["local-proxies"]["payload"], [
-            {"dialer-proxy": DIALER_GROUP, **node} for node in self.nodes["proxies"]
-        ])
+        self.assertEqual(patch["proxy-providers"]["local-proxies"]["payload"], self.nodes["proxies"])
         self.assertEqual(patch["+rules"], self.policy["rules"])
         self.assertEqual(patch["proxy-groups+"][1]["use"], ["local-proxies"])
         self.assertFalse({"mixed-port", "dns", "tun", "mode", "rules"} & patch.keys())
@@ -258,7 +256,7 @@ class BuildTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "rules/invalid.yml:"):
                     render(self.root)
 
-    def test_generates_default_dialer_without_changing_sources(self):
+    def test_generates_jump_group_without_injecting_node_dialer(self):
         source = self.root / "proxies.yaml"
         before = source.read_bytes()
         overlay = load_overlay(self.root)
@@ -270,7 +268,8 @@ class BuildTests(unittest.TestCase):
         self.assertNotIn("proxies", front)
         self.assertNotIn("use", front)
         self.assertEqual(overlay["profile"], {"store-selected": True})
-        self.assertEqual(overlay["proxy-providers"]["local-proxies"]["payload"][0]["dialer-proxy"], DIALER_GROUP)
+        self.assertEqual(overlay["proxy-providers"]["local-proxies"]["payload"], self.nodes["proxies"])
+        self.assertNotIn("dialer-proxy", overlay["proxy-providers"]["local-proxies"]["payload"][0])
         render(self.root)
         self.assertEqual(source.read_bytes(), before)
 
@@ -286,10 +285,25 @@ class BuildTests(unittest.TestCase):
         self.assertIsNone(pattern.fullmatch("Airport-Node"))
 
     def test_preserves_explicit_dialer(self):
-        self.nodes["proxies"][0]["dialer-proxy"] = "DIRECT"
+        base = self.nodes["proxies"][0]
+        self.nodes["proxies"] = [
+            dict(base),
+            *({**base, "name": f"Static-{index}", "dialer-proxy": dialer}
+              for index, dialer in enumerate((DIALER_GROUP, "Custom-Front", "Front-Node", "DIRECT"))),
+        ]
         self.write_sources()
-        overlay = load_overlay(self.root)
-        self.assertEqual(overlay["proxy-providers"]["local-proxies"]["payload"][0]["dialer-proxy"], "DIRECT")
+        source = self.root / "proxies.yaml"
+        before = source.read_bytes()
+        self.assertEqual(load_overlay(self.root)["proxy-providers"]["local-proxies"]["payload"], self.nodes["proxies"])
+        artifacts = render(self.root)
+        patch_text = artifacts["openclash.conf"].split("[YAML]\n", 1)[1].split("[Overwrite]", 1)[0]
+        self.assertEqual(yaml.safe_load(patch_text)["proxy-providers"]["local-proxies"]["payload"], self.nodes["proxies"])
+        if shutil.which("node"):
+            script = self.root / "extension.js"
+            script.write_text(artifacts["clash-verge.js"], encoding="utf-8")
+            merged = merge_verge(script, self.subscription())
+            self.assertEqual(merged["proxy-providers"]["local-proxies"]["payload"], self.nodes["proxies"])
+        self.assertEqual(source.read_bytes(), before)
 
     def test_rejects_invalid_or_duplicate_dialer(self):
         self.nodes["proxies"][0]["dialer-proxy"] = None

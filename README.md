@@ -12,7 +12,7 @@
    cp proxies.yaml.example proxies.yaml
    ```
 
-2. 编辑 `proxies.yaml`，将示例中的服务器地址、端口、用户名和密码替换为实际节点信息，端口填写整数。可按需增加节点或调整协议类型；沿用默认 Anthropic 规则时，可保留示例节点名称。若修改名称，需确保它符合 `rules/anthropic.yaml` 中的 `filter`。
+2. 编辑 `proxies.yaml`，将示例中的服务器地址、端口、用户名和密码替换为实际节点信息，端口填写整数。各节点的前置通过 `dialer-proxy` 自行配置，无需前置时删除该字段。可按需增加节点或调整协议类型；沿用默认 Anthropic 规则时，可保留示例节点名称。若修改名称，需确保它符合 `rules/anthropic.yaml` 中的 `filter`。
 
 3. 执行构建：
 
@@ -81,7 +81,7 @@ rules:
 dns:
   nameserver-policy:
     "+.claude.ai": "https://1.1.1.1/dns-query#Anthropic"
-    "+.d.ip.net.coffee": "https://1.1.1.1/dns-query#Anthropic"
+    "+.ip.net.coffee": "https://1.1.1.1/dns-query#Anthropic"
 ```
 
 `+.` 匹配域名自身及各级子域名；`#Anthropic` 让这些查询通过 `Anthropic` 当前选择的节点发送到 Cloudflare DoH。请在该组选择美国落地节点。使用 IP 地址作为 DoH 地址，无需先解析 DNS 服务器的域名。其他域名继续使用原订阅的 DNS；原订阅中的 `nameserver`、`fallback`、DNS 监听和启用状态均保留，同名 `nameserver-policy` 键由个人定义替换。
@@ -90,9 +90,25 @@ dns:
 
 DNS 策略不能直接表达 `DOMAIN-KEYWORD`，因此配置中列出了 Datadog、Sift 的已知服务域名；今后新增此类服务域名时需同步维护 DNS 策略。
 
-[Claude 检测页](https://ip.net.coffee/claude/) 使用 `d.ip.net.coffee` 下的随机域名检查 DNS，并不直接检查 Anthropic 的解析。配置同时为这些探测域名添加了 DNS 策略和流量规则，兼容 fake-ip 模式下 SOCKS5 节点的远端解析。检测站主页及其他域名仍沿用原订阅规则。页面显示的是递归 DNS 服务器的出口归属地，可能与美国代理 IP 不同；Cloudflare 的 Anycast 路由和 IP 地理库也会影响显示结果，不能保证始终标为美国。
+[Claude 检测页](https://ip.net.coffee/claude/) 使用 `d.ip.net.coffee` 下的随机域名检查 DNS，并不直接检查 Anthropic 的解析。配置为整个 `ip.net.coffee` 添加了 DNS 策略和流量规则，包含检测站主页、接口和这些探测域名，兼容 fake-ip 模式下 SOCKS5 节点的远端解析。页面显示的是递归 DNS 服务器的出口归属地，可能与美国代理 IP 不同；Cloudflare 的 Anycast 路由和 IP 地理库也会影响显示结果，不能保证始终标为美国。
 
 重新构建并在客户端替换产物、应用配置后再检测。浏览器和系统的 DNS 查询需要进入 Mihomo；浏览器若启用独立的「安全 DNS」，应关闭它或确认其解析路径经过预期代理。新策略不会使已经缓存的解析结果立即失效，必要时清理缓存或重启客户端。此仓库不自动开启 DNS、TUN 或 DNS 劫持，也不直接修改正在运行的客户端。
+
+## WebRTC UDP 出口
+
+WebRTC 使用 STUN 服务器获取 UDP 出口 IP，不会连接当前页面的域名。上述检测页当前使用 `stun.l.google.com:19302` 和 `stun.cloudflare.com:3478`，所以仅为 `claude.ai` 或 `ip.net.coffee` 添加域名规则无法统一 WebRTC 的出口。
+
+`rules/anthropic.yaml` 将 UDP 目标端口 `19302`、`3478` 和常用的 `5349` 路由到 `Anthropic`，同时适用于 IPv4 和 IPv6。这些规则放在本文件的其他规则之前；后面紧接同条件的 `REJECT`，因为 [Mihomo 在目标节点不支持 UDP 时会继续匹配后续规则](https://wiki.metacubex.one/config/rules/)。节点不支持 UDP 时会阻止这些探测继续走原订阅的其他出口，页面可能显示「未检测到泄露」或无 UDP 地址；这不代表 UDP 已成功通过落地节点。其他规则文件按文件名排序合并，不应在更早加载的文件中提前放行这些端口。
+
+要让 UDP 检测实际显示 `Anthropic` 所选代理的 IP，需要同时满足：
+
+1. 浏览器的 UDP 进入 Mihomo。在 Clash Verge Rev 开启 TUN 并确认路由接管 UDP；OpenClash 需使用支持 UDP 转发的模式。仅开启系统 HTTP 代理不能接管 WebRTC UDP。
+2. 落地 SOCKS5 服务支持 `UDP ASSOCIATE`，并在本地 `proxies.yaml` 的对应节点添加 `udp: true`；示例已包含该字段。该开关无法让原本只支持 TCP 的服务提供 UDP。
+3. 如节点配置了 `dialer-proxy`，指定的前置链路也需支持 UDP，并能访问落地服务返回的 UDP 中继地址；落地服务的 UDP 和 TCP 出口 IP 也需一致。
+
+满足条件后重新构建、替换客户端产物并应用配置，再关闭旧检测页面、重新打开检测。在连接日志中检查目标端口 `19302` / `3478` 的 UDP 是否命中 `Anthropic`；如果出现 SOCKS5 握手错误或 UDP 超时，需要检查落地服务和前置链路。
+
+Mihomo 无法从 STUN 数据包判断它来自哪个网页，因此这些端口规则会影响其他网站和应用使用相同端口的语音、视频和 STUN 流量。它们不会改动 TCP 或 UDP 443 的路由，也不能覆盖任意端口的所有 WebRTC / TURN 探测。此检测站的结果不能证明 Anthropic 使用相同探测机制；如实际连接使用其他端点，需根据连接日志补充规则。
 
 ## 前置代理
 
@@ -102,13 +118,13 @@ DNS 策略不能直接表达 `DOMAIN-KEYWORD`，因此配置中列出了 Datadog
 本机 → 已有订阅的前置节点 → 个人静态节点 → 目标网站
 ```
 
-构建脚本会自动创建名为 `jump-default` 的 `select` 组，并为没有显式指定 `dialer-proxy` 的个人节点生成：
+构建脚本始终自动创建名为 `jump-default` 的 `select` 组；节点是否使用前置、使用哪个前置，由 `proxies.yaml` 中各节点的 `dialer-proxy` 决定。构建时原样保留节点配置，不自动补充该字段。需要使用 `jump-default` 时，在对应节点下显式填写：
 
 ```yaml
 dialer-proxy: jump-default
 ```
 
-无需在源文件中重复填写默认前置，也无需知道机场的节点组或 provider 名称。生成的前置组使用 `include-all`，由 Mihomo 在加载配置时收集原订阅中的普通节点及代理集合节点。两端适配器还会在合并订阅时收集原有的 `select`、`url-test`、`fallback` 等策略组，作为 `jump-default` 的显式选项；可以选择订阅的自动选择组，也可以继续直接选择节点。
+示例节点已显式填写 `dialer-proxy: jump-default`；无需前置时删除该字段，构建脚本不会再自动加回。引用 `jump-default` 无需知道机场的节点组或 provider 名称。生成的前置组使用 `include-all`，由 Mihomo 在加载配置时收集原订阅中的普通节点及代理集合节点。两端适配器还会在合并订阅时收集原有的 `select`、`url-test`、`fallback` 等策略组，作为 `jump-default` 的显式选项；可以选择订阅的自动选择组，也可以继续直接选择节点。
 
 - 构建时根据 `proxies.yaml` 中全部个人节点的完整名称生成排除正则，避免将落地节点选作自身的前置；节点名称中的正则特殊字符会转义。
 - 策略组选项按订阅中的顺序保留；同名组以最后定义为准。自动收集的节点继续由 Mihomo 排序。首次使用时默认选中第一项，需要手动确认一个可用的境外节点或策略组。
@@ -119,9 +135,9 @@ dialer-proxy: jump-default
 
 个人节点不需要遵守任何命名前缀才能从前置组排除。业务组自身的 `filter` 仍按各规则文件中的配置生效，例如当前 `Anthropic` 组使用 `rules/anthropic.yaml` 中的筛选表达式。
 
-如果某个个人节点确实需要其他前置，可以在该节点的源配置中显式设置 `dialer-proxy`，构建时会保留。显式引用的节点或策略组需要在最终订阅配置中存在。`jump-default` 是自动生成的保留组名，请不要在规则源文件中再定义同名组。
+不同个人节点可以通过 `dialer-proxy` 指定不同的前置节点或策略组，也可以省略该字段以不指定前置。显式引用的节点或策略组需要在最终订阅配置中存在。`jump-default` 是自动生成的保留组名，请不要在规则源文件中再定义同名组。
 
-构建并将产物应用到订阅后，先在 `jump-default` 中选择可用的境外节点，再测试个人静态节点。前置节点自身的测速结果只反映它访问测速站的情况；静态节点的测试结果才能验证整条代理链。
+构建并将产物应用到订阅后，如个人节点引用了 `jump-default`，先在该组中选择可用的境外节点，再测试个人静态节点。前置节点自身的测速结果只反映它访问测速站的情况；静态节点的测试结果才能验证整条代理链。
 
 ## 客户端接入
 
@@ -130,7 +146,7 @@ dialer-proxy: jump-default
 1. 构建后打开 `dist/clash-verge.js`，复制全部内容。
 2. 在「订阅」页面右键目标订阅，进入该订阅的扩展脚本编辑器（通常为「编辑脚本」）。
 3. 粘贴生成脚本并保存，应用或重新激活该订阅。
-4. 在代理面板中的 `jump-default` 选择可用的订阅节点或策略组，再在 `Anthropic` 选择你的落地节点。
+4. 在代理面板中的 `Anthropic` 选择你的落地节点；若该节点配置了 `dialer-proxy: jump-default`，还需在 `jump-default` 选择可用的订阅节点或策略组。
 
 如果希望所有订阅都应用，可将同一脚本放入全局扩展脚本。一个订阅选择一种挂载方式即可；已有其他扩展脚本时，需要将其逻辑与此脚本合并，保持一个 `main(config)` 入口。
 
@@ -142,7 +158,7 @@ dialer-proxy: jump-default
 
 1. 将生成的 `dist/openclash.conf` 作为本地覆写模块导入；若界面需要先创建本地模块，则将文件内容粘贴到模块编辑器中。
 2. 启用该模块，并在模块的配置匹配设置中选择需要应用的订阅配置。
-3. 保存并重启 OpenClash，先在 `jump-default` 选择可用的订阅节点或策略组，再在 `Anthropic` 选择落地节点。
+3. 保存并重启 OpenClash，在 `Anthropic` 选择落地节点；若该节点配置了 `dialer-proxy: jump-default`，还需在 `jump-default` 选择可用的订阅节点或策略组。
 
 使用的是「覆写模块」功能，不是把 `.conf` 当作完整 YAML 配置上传。模块里的 YAML 块追加策略组、前置规则；helper 在 YAML 合并后按名称去重策略组，以最后追加的个人定义为准。
 

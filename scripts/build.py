@@ -173,8 +173,7 @@ def load_overlay(root: Path) -> dict:
             not isinstance(proxy["dialer-proxy"], str) or not proxy["dialer-proxy"].strip()
         ):
             raise ValueError(f"{proxy['name']}: dialer-proxy 必须是有效的节点或策略组名称")
-    # 默认值仅写入产物；源文件中显式指定的前置保留。
-    proxies = [{"dialer-proxy": DIALER_GROUP, **proxy} for proxy in proxies]
+    # 节点前置仅由 proxies.yaml 决定，不注入默认 dialer-proxy。
     overlay = {
         "profile": {"store-selected": True},
         "proxy-providers": {PROXY_PROVIDER: {"type": "inline", "payload": proxies}},

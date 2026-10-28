@@ -6,3 +6,7 @@ proxies:
     port: xxxx
     username: xxxx
     password: xxxx
+    # 显式选择前置；无需前置时删除此项。
+    dialer-proxy: "jump-default"
+    # 需要服务端支持 SOCKS5 UDP ASSOCIATE；如使用前置，也需其支持 UDP。
+    udp: true
